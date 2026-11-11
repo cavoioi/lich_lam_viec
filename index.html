@@ -66,7 +66,7 @@ var defaults={
   name:'',
   city:{name:'Hà Nội',lat:21.0285,lon:105.8542},
   show:{lunar:true,weather:true,aqi:true,hourly:true,events:true,upcoming:true,tasks:true,countdown:true,note:true,history:true},
-  scale:1,refreshMin:30,wake:false,
+  scale:1,refreshMin:30,wake:false,histMode:'mix',histCount:4,
   events:[],tasks:[],countdowns:[],note:'',lastDay:''
 };
 var state=load();
@@ -161,23 +161,101 @@ function fetchWeather(){
     getJSON(u2).then(function(j){air=j;}).catch(function(){})
   ]).then(function(){if(view==='main')render();});
 }
-function fetchHistory(){
-  var d=new Date(),key=KEY+'-h-'+ymd(d);
-  try{var c=JSON.parse(localStorage.getItem(key));if(c&&c.length){hist=c;return Promise.resolve();}}catch(e){}
-  function tryLang(lang){
-    var u='https://'+lang+'.wikipedia.org/api/rest_v1/feed/onthisday/events/'+pad(d.getMonth()+1)+'/'+pad(d.getDate());
-    return getJSON(u).then(function(j){
-      var ev=(j.events||[]).filter(function(e){return e.text&&e.text.length<170;});
-      ev.sort(function(a,b){return (b.pages||[]).length-(a.pages||[]).length;});
-      ev=ev.slice(0,4).sort(function(a,b){return a.year-b.year;}).map(function(e){return {y:e.year,t:e.text};});
-      if(!ev.length)throw new Error('empty');
-      return ev;
-    });
+/* ---------- ngày này trong lịch sử: ưu tiên Việt Nam, chỉ tiếng Việt ---------- */
+/* [tháng, ngày, năm, nội dung] – các mốc cố định theo dương lịch, luôn hiển thị được kể cả khi mất mạng */
+var VN_DAYS=[
+[1,6,1946,'Cuộc Tổng tuyển cử đầu tiên bầu Quốc hội của nước Việt Nam Dân chủ Cộng hòa.'],
+[1,19,1974,'Hải chiến Hoàng Sa giữa hải quân Việt Nam Cộng hòa và Trung Quốc.'],
+[1,27,1973,'Hiệp định Paris về chấm dứt chiến tranh, lập lại hòa bình ở Việt Nam được ký kết.'],
+[1,31,1968,'Cuộc Tổng tiến công và nổi dậy Tết Mậu Thân bùng nổ trên toàn miền Nam.'],
+[2,3,1930,'Thành lập Đảng Cộng sản Việt Nam, do Nguyễn Ái Quốc chủ trì hội nghị hợp nhất các tổ chức cộng sản.'],
+[2,17,1979,'Chiến tranh biên giới phía Bắc nổ ra.'],
+[3,9,1945,'Nhật đảo chính Pháp trên toàn Đông Dương.'],
+[3,10,1975,'Chiến dịch Tây Nguyên mở màn bằng trận đánh Buôn Ma Thuột.'],
+[3,14,1988,'Sự kiện Gạc Ma ở quần đảo Trường Sa: 64 cán bộ, chiến sĩ hải quân Việt Nam hy sinh.'],
+[3,26,1931,'Thành lập Đoàn Thanh niên Cộng sản Hồ Chí Minh.'],
+[4,26,1975,'Chiến dịch Hồ Chí Minh bắt đầu.'],
+[4,30,1975,'Chiến dịch Hồ Chí Minh toàn thắng, Sài Gòn được giải phóng, đất nước thống nhất.'],
+[5,7,1954,'Chiến thắng Điện Biên Phủ, kết thúc chiến dịch lịch sử kéo dài 56 ngày đêm.'],
+[5,19,1890,'Chủ tịch Hồ Chí Minh ra đời tại Nghệ An.'],
+[5,19,1941,'Mặt trận Việt Minh được thành lập tại Pác Bó, Cao Bằng.'],
+[6,5,1911,'Nguyễn Tất Thành rời bến Nhà Rồng (Sài Gòn) ra đi tìm đường cứu nước.'],
+[6,21,1925,'Báo Thanh Niên số đầu tiên ra mắt, nay là Ngày Báo chí Cách mạng Việt Nam.'],
+[7,2,1976,'Quốc hội thống nhất đặt tên nước là Cộng hòa Xã hội Chủ nghĩa Việt Nam.'],
+[7,21,1954,'Hiệp định Giơnevơ về chấm dứt chiến sự ở Đông Dương được ký kết.'],
+[7,27,1947,'Lần đầu tổ chức Ngày Thương binh, nay là Ngày Thương binh – Liệt sĩ.'],
+[8,19,1945,'Cách mạng Tháng Tám thành công tại Hà Nội.'],
+[9,2,1945,'Chủ tịch Hồ Chí Minh đọc Tuyên ngôn Độc lập tại Quảng trường Ba Đình, khai sinh nước Việt Nam Dân chủ Cộng hòa.'],
+[9,2,1969,'Chủ tịch Hồ Chí Minh từ trần.'],
+[9,12,1930,'Phong trào Xô viết Nghệ Tĩnh bùng lên với cuộc biểu tình ở Hưng Nguyên.'],
+[9,23,1945,'Nhân dân Nam Bộ bắt đầu cuộc kháng chiến chống thực dân Pháp trở lại xâm lược.'],
+[10,10,1954,'Giải phóng Thủ đô Hà Nội.'],
+[10,20,1930,'Thành lập Hội Phụ nữ phản đế, tiền thân của Hội Liên hiệp Phụ nữ Việt Nam.'],
+[11,20,1982,'Ngày Nhà giáo Việt Nam được tổ chức lần đầu vào ngày 20/11.'],
+[11,23,1940,'Khởi nghĩa Nam Kỳ bùng nổ.'],
+[12,18,1972,'Bắt đầu chiến dịch ném bom B-52 xuống Hà Nội, mở màn trận "Hà Nội – Điện Biên Phủ trên không".'],
+[12,19,1946,'Cuộc kháng chiến toàn quốc chống thực dân Pháp bùng nổ.'],
+[12,22,1944,'Thành lập Đội Việt Nam Tuyên truyền Giải phóng quân, tiền thân của Quân đội nhân dân Việt Nam.']
+];
+var VN_RE=/việt nam|hà nội|sài gòn|hồ chí minh|đông dương|đại việt|đại nam|nam kỳ|bắc kỳ|trung kỳ|nam bộ|bắc bộ|việt minh|việt cộng|điện biên|huế|đà nẵng|hải phòng|cần thơ|nha trang|đà lạt|triều nguyễn|nhà nguyễn|nhà trần|nhà lý|nhà lê|nhà hồ|nhà mạc|nhà đinh|nhà tây sơn|tây sơn|thăng long|an nam|annam|bảo đại|ngô đình|võ nguyên giáp|hoàng sa|trường sa|vịnh bắc bộ|sông hồng|sông mê kông|mê kông/i;
+function vnScore(t){var m=String(t).match(new RegExp(VN_RE.source,'ig'));return m?m.length:0;}
+function cleanWiki(s){
+  return s.replace(/<ref[^>]*\/>/gi,'').replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi,'')
+    .replace(/\{\{[^{}]*\}\}/g,'').replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,'$1')
+    .replace(/\[https?:[^\s\]]+\s*([^\]]*)\]/g,'$1').replace(/'{2,}/g,'').replace(/<[^>]+>/g,'')
+    .replace(/\s+/g,' ').trim();
+}
+function parseDay(wikitext){
+  var lines=wikitext.split('\n'),inSec=false,out=[];
+  for(var i=0;i<lines.length;i++){
+    var L=lines[i],h=/^==\s*([^=].*?)\s*==\s*$/.exec(L);
+    if(h){inSec=/^sự kiện/i.test(h[1].trim());continue;}
+    if(!inSec||L.charAt(0)!=='*')continue;
+    var t=cleanWiki(L.replace(/^\*+\s*/,'')),m=/^(?:năm\s+)?(\d{3,4})\s*[–—:\-]\s*(.+)$/i.exec(t);
+    if(!m)continue;
+    out.push({y:+m[1],t:m[2].trim()});
   }
-  return tryLang('vi').catch(function(){return tryLang('en');}).then(function(ev){
-    hist=ev;try{localStorage.setItem(key,JSON.stringify(ev));}catch(e){}
-    if(view==='main')render();
-  }).catch(function(){});
+  return out;
+}
+function curatedFor(mo,da){
+  return VN_DAYS.filter(function(x){return x[0]===mo&&x[1]===da;}).map(function(x){return {y:x[2],t:x[3],vn:true};});
+}
+function byYear(a,b){return a.y-b.y;}
+function pickSpread(arr,n){
+  if(arr.length<=n)return arr.slice();
+  var out=[],step=arr.length/n;
+  for(var i=0;i<n;i++)out.push(arr[Math.floor(i*step)]);
+  return out;
+}
+function mergeHist(cur,ev){
+  var max=state.histCount||4,mode=state.histMode||'mix',seenY={};
+  var vn=cur.slice();
+  vn.forEach(function(e){seenY[e.y]=1;});
+  ev.filter(function(e){return e.vn;}).sort(function(a,b){return vnScore(b.t)-vnScore(a.t);}).forEach(function(e){
+    if(!seenY[e.y]&&vn.length<max){seenY[e.y]=1;vn.push({y:e.y,t:e.t,vn:true});}
+  });
+  vn=vn.slice(0,max).sort(byYear);
+  var world=[];
+  if(mode!=='vn'&&vn.length<max){
+    var pool=ev.filter(function(e){return !e.vn&&e.t.length>=25&&e.t.length<=170;});
+    world=pickSpread(pool,max-vn.length).map(function(e){return {y:e.y,t:e.t,vn:false};}).sort(byYear);
+  }
+  return vn.concat(world);
+}
+function fetchHistory(){
+  var d=new Date(),key=KEY+'-h2-'+ymd(d),curated=curatedFor(d.getMonth()+1,d.getDate()),cached=null;
+  hist=curated.slice();                       // hiển thị ngay phần có sẵn
+  try{cached=JSON.parse(localStorage.getItem(key));}catch(e){}
+  if(cached&&cached.length){hist=mergeHist(curated,cached);if(view==='main')render();return Promise.resolve();}
+  var u='https://vi.wikipedia.org/w/api.php?action=parse&page='+encodeURIComponent(d.getDate()+' tháng '+(d.getMonth()+1))+
+        '&prop=wikitext&format=json&redirects=1&origin=*';
+  return getJSON(u,20000).then(function(j){
+    var wt=j&&j.parse&&j.parse.wikitext&&j.parse.wikitext['*'],ev=wt?parseDay(wt):[];
+    if(!ev.length)throw new Error('empty');
+    ev.forEach(function(e){e.vn=vnScore(e.t)>0;});
+    try{localStorage.setItem(key,JSON.stringify(ev));}catch(e){}
+    hist=mergeHist(curated,ev);
+  }).catch(function(){}).then(function(){if(view==='main')render();});
 }
 
 /* ---------- giao diện chính ---------- */
@@ -252,7 +330,12 @@ function noteHTML(){
 }
 function historyHTML(){
   if(!hist||!hist.length)return '';
-  return card('Ngày này trong lịch sử','<ul class="hist">'+hist.map(function(e){return '<li><b>'+e.y+'</b> '+esc(e.t)+'</li>';}).join('')+'</ul>');
+  var vn=hist.filter(function(e){return e.vn;}),w=hist.filter(function(e){return !e.vn;});
+  function ul(a){return '<ul class="hist">'+a.map(function(e){return '<li><b>'+e.y+'</b> '+esc(e.t)+'</li>';}).join('')+'</ul>';}
+  var h='';
+  if(vn.length)h+=(w.length?'<div class="day">Việt Nam</div>':'')+ul(vn);
+  if(w.length)h+='<div class="day" style="margin-top:.3rem">Thế giới</div>'+ul(w);
+  return card('Ngày này trong lịch sử',h);
 }
 function renderMain(){
   var now=new Date(),s=state.show;
@@ -269,6 +352,13 @@ function renderMain(){
 }
 
 /* ---------- màn hình chỉnh sửa ---------- */
+function histControls(){
+  var m=state.histMode||'mix',n=state.histCount||4;
+  return '<div class="f"><span>Lịch sử:</span><select id="in-hmode" data-act="setHMode">'+
+    '<option value="mix"'+(m==='mix'?' selected':'')+'>Việt Nam trước, bổ sung thế giới</option>'+
+    '<option value="vn"'+(m==='vn'?' selected':'')+'>Chỉ Việt Nam</option></select>'+
+    '<select id="in-hcount" data-act="setHCount">'+[3,4,5,6].map(function(k){return '<option value="'+k+'"'+(n===k?' selected':'')+'>'+k+' mục</option>';}).join('')+'</select></div>';
+}
 function renderEdit(){
   var h='<div class="head"><div class="date">Chỉnh sửa</div><button class="btn on" data-act="done">Xong</button></div>';
   // chung
@@ -283,7 +373,7 @@ function renderEdit(){
   // hiển thị
   h+='<div class="card"><h2>Hiển thị mục nào</h2>'+SECTIONS.map(function(x){
     return '<label class="chk"><input type="checkbox" data-act="show" data-id="'+x[0]+'"'+(state.show[x[0]]?' checked':'')+'> '+x[1]+'</label>';
-  }).join('')+'</div>';
+  }).join('')+histControls()+'</div>';
   // sự kiện
   var today=ymd(new Date());
   h+='<div class="card"><h2>Sự kiện / lịch hẹn</h2>'+
@@ -360,6 +450,8 @@ function onChange(ev){
   if(!act)return;
   if(act==='show'){state.show[el.getAttribute('data-id')]=el.checked;save();}
   else if(act==='setRef'){state.refreshMin=+el.value;save();}
+  else if(act==='setHMode'){state.histMode=el.value;save();fetchHistory();}
+  else if(act==='setHCount'){state.histCount=+el.value;save();fetchHistory();}
   else if(act==='setWake'){state.wake=el.checked;save();applyWake();}
 }
 function setScale(dx){state.scale=Math.max(0.7,Math.min(1.8,Math.round((state.scale+dx)*10)/10));save();applyScale();render();}

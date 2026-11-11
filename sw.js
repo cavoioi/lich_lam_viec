@@ -1,6 +1,6 @@
 /* Service worker: giữ phần giao diện để mở được khi ngoại tuyến.
    Các API thời tiết / Wikipedia (khác tên miền) luôn đi thẳng ra mạng. */
-var CACHE = 'bang-tin-v1';
+var CACHE = 'bang-tin-v2';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {

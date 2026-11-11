@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Bảng tin hôm nay</title>
+<style>
+:root{--s:1}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:calc(16px * var(--s))}
+body{background:#fff;color:#000;font-family:"Segoe UI",Roboto,"Noto Sans",Arial,sans-serif;line-height:1.35;-webkit-tap-highlight-color:transparent}
+.wrap{padding:.6rem;max-width:1200px;margin:0 auto}
+.card{border:2px solid #000;padding:.6rem .7rem;margin-bottom:.6rem;break-inside:avoid;-webkit-column-break-inside:avoid}
+.card h2{font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid #000;padding-bottom:.25rem;margin-bottom:.45rem}
+.cols{column-gap:.6rem}
+@media (min-aspect-ratio:1/1){.cols{columns:2}}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;border:2px solid #000;padding:.6rem .7rem;margin-bottom:.6rem}
+.hello{font-size:.95rem}
+.date{font-size:1.5rem;font-weight:700;line-height:1.15}
+.lunar{font-size:.95rem}
+.clock{font-size:3.2rem;font-weight:700;line-height:1;text-align:right;font-variant-numeric:tabular-nums}
+.bar{height:.5rem;border:2px solid #000;margin-top:.5rem}
+.bar i{display:block;height:100%;background:#000}
+.mut{color:#444;font-size:.85rem}
+.big{font-size:2.6rem;font-weight:700;line-height:1}
+.row{display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap}
+.hours{display:flex;border-top:1px solid #000;margin-top:.5rem;padding-top:.4rem}
+.hours div{flex:1;text-align:center;font-size:.85rem}
+.hours b{display:block;font-size:1rem}
+ul{list-style:none}
+li{padding:.28rem 0;border-bottom:1px dotted #000;font-size:1.02rem}
+li:last-child{border-bottom:none}
+li.done span.t{text-decoration:line-through;color:#555}
+.box{display:inline-block;width:1.15rem;height:1.15rem;border:2px solid #000;vertical-align:-.15rem;margin-right:.4rem;text-align:center;line-height:.85rem;font-size:.9rem;font-weight:700}
+.btn{border:2px solid #000;background:#fff;color:#000;padding:.35rem .8rem;font:inherit;min-height:2.3rem;cursor:pointer}
+.btn.on{background:#000;color:#fff}
+.btn.sm{padding:.15rem .5rem;min-height:1.8rem;font-size:.85rem}
+input,select,textarea{border:2px solid #000;background:#fff;color:#000;font:inherit;padding:.35rem .5rem;min-height:2.3rem;width:100%}
+textarea{min-height:5rem}
+.f{display:flex;gap:.4rem;flex-wrap:wrap;margin:.35rem 0}
+.f>*{flex:1 1 7rem}
+.f>.btn{flex:0 0 auto}
+label.chk{display:flex;align-items:center;gap:.5rem;padding:.25rem 0}
+label.chk input{width:1.3rem;min-height:1.3rem;flex:0 0 auto}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.2rem 0 1rem}
+.hist li b{display:inline-block;min-width:3.2rem}
+.day{font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+(function(){
+'use strict';
+var KEY='boox-bang-tin-v1';
+var DOW=['Chủ nhật','Thứ hai','Thứ ba','Thứ tư','Thứ năm','Thứ sáu','Thứ bảy'];
+var REP={none:'Một lần',daily:'Hằng ngày',weekly:'Hằng tuần',monthly:'Hằng tháng',yearly:'Hằng năm'};
+var SECTIONS=[['lunar','Âm lịch'],['weather','Thời tiết'],['aqi','Chất lượng không khí'],['hourly','Dự báo theo giờ'],['events','Sự kiện hôm nay'],['upcoming','7 ngày tới'],['tasks','Việc cần làm'],['countdown','Đếm ngược'],['note','Ghi chú'],['history','Ngày này trong lịch sử']];
+var defaults={
+  name:'',
+  city:{name:'Hà Nội',lat:21.0285,lon:105.8542},
+  show:{lunar:true,weather:true,aqi:true,hourly:true,events:true,upcoming:true,tasks:true,countdown:true,note:true,history:true},
+  scale:1,refreshMin:30,wake:false,
+  events:[],tasks:[],countdowns:[],note:'',lastDay:''
+};
+var state=load();
+var view='main';
+var weather=null,air=null,weatherErr='',lastFetch=0,hist=null;
+var wl=null;
+
+function clone(o){return JSON.parse(JSON.stringify(o));}
+function merge(r){
+  var d=clone(defaults);
+  if(r&&typeof r==='object'){
+    for(var k in r){
+      if(d[k]&&typeof d[k]==='object'&&!Array.isArray(d[k])&&r[k]&&typeof r[k]==='object'){Object.assign(d[k],r[k]);}
+      else d[k]=r[k];
+    }
+  }
+  return d;
+}
+function load(){try{return merge(JSON.parse(localStorage.getItem(KEY)));}catch(e){return clone(defaults);}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function pad(n){return (n<10?'0':'')+n;}
+function ymd(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function parseYmd(s){var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||'');return m?new Date(+m[1],+m[2]-1,+m[3]):null;}
+function addDays(d,n){return new Date(d.getFullYear(),d.getMonth(),d.getDate()+n);}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+function dm(d){return pad(d.getDate())+'/'+pad(d.getMonth()+1);}
+
+function occurs(ev,dt){
+  var s=parseYmd(ev.date);if(!s)return false;
+  var t=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate());
+  if(t<s)return false;
+  switch(ev.repeat){
+    case 'daily':return true;
+    case 'weekly':return t.getDay()===s.getDay();
+    case 'monthly':return t.getDate()===s.getDate();
+    case 'yearly':return t.getDate()===s.getDate()&&t.getMonth()===s.getMonth();
+    default:return ymd(t)===ymd(s);
+  }
+}
+function eventsOn(dt){
+  return state.events.filter(function(e){return occurs(e,dt);}).sort(function(a,b){return (a.time||'').localeCompare(b.time||'');});
+}
+function lunar(d){
+  try{
+    var p=new Intl.DateTimeFormat('en-u-ca-chinese',{day:'numeric',month:'numeric'}).formatToParts(d);
+    var day='',mon='';
+    p.forEach(function(x){if(x.type==='day')day=x.value;if(x.type==='month')mon=x.value;});
+    return day+'/'+String(mon).replace('bis',' nhuận');
+  }catch(e){return '';}
+}
+function dailyMaintenance(){
+  var today=ymd(new Date());
+  if(state.lastDay!==today){
+    state.tasks=state.tasks.filter(function(t){return t.repeat||!t.done;}).map(function(t){if(t.repeat)t.done=false;return t;});
+    state.lastDay=today;save();
+  }
+}
+
+/* ---------- thời tiết ---------- */
+var WCODE={0:['☀','Trời quang'],1:['☀','Ít mây'],2:['☁','Có mây'],3:['☁','Nhiều mây'],45:['≋','Sương mù'],48:['≋','Sương mù đóng băng'],
+51:['☂','Mưa phùn nhẹ'],53:['☂','Mưa phùn'],55:['☂','Mưa phùn dày'],56:['☂','Mưa phùn lạnh'],57:['☂','Mưa phùn lạnh'],
+61:['☂','Mưa nhỏ'],63:['☂','Mưa vừa'],65:['☂','Mưa to'],66:['☂','Mưa lạnh'],67:['☂','Mưa lạnh'],
+71:['❄','Tuyết nhẹ'],73:['❄','Tuyết'],75:['❄','Tuyết dày'],77:['❄','Hạt tuyết'],
+80:['☂','Mưa rào nhẹ'],81:['☂','Mưa rào'],82:['☂','Mưa rào lớn'],85:['❄','Tuyết rào'],86:['❄','Tuyết rào lớn'],
+95:['⚡','Dông'],96:['⚡','Dông, mưa đá'],99:['⚡','Dông, mưa đá lớn']};
+function wc(code){var w=WCODE[code]||['?','Không rõ'];return {ic:w[0]+'\uFE0E',tx:w[1]};}
+function aqiLabel(v){
+  if(v<=50)return 'Tốt';if(v<=100)return 'Trung bình';if(v<=150)return 'Kém (người nhạy cảm nên hạn chế ra ngoài)';
+  if(v<=200)return 'Xấu';if(v<=300)return 'Rất xấu';return 'Nguy hại';
+}
+function getJSON(url,ms){
+  return new Promise(function(res,rej){
+    var done=false;
+    var t=setTimeout(function(){if(!done){done=true;rej(new Error('timeout'));}},ms||15000);
+    fetch(url).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+      .then(function(j){if(!done){done=true;clearTimeout(t);res(j);}})
+      .catch(function(e){if(!done){done=true;clearTimeout(t);rej(e);}});
+  });
+}
+function fetchWeather(){
+  var c=state.city;
+  var u1='https://api.open-meteo.com/v1/forecast?latitude='+c.lat+'&longitude='+c.lon+
+    '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m'+
+    '&hourly=temperature_2m,precipitation_probability,weather_code'+
+    '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset'+
+    '&timezone=auto&forecast_days=2';
+  var u2='https://air-quality-api.open-meteo.com/v1/air-quality?latitude='+c.lat+'&longitude='+c.lon+'&current=us_aqi,pm2_5&timezone=auto';
+  lastFetch=Date.now();
+  return Promise.all([
+    getJSON(u1).then(function(j){weather=j;weatherErr='';try{localStorage.setItem(KEY+'-w',JSON.stringify({t:Date.now(),j:j}));}catch(e){}}).catch(function(e){if(!weather)weatherErr='Không tải được thời tiết (kiểm tra Wi-Fi).';}),
+    getJSON(u2).then(function(j){air=j;}).catch(function(){})
+  ]).then(function(){if(view==='main')render();});
+}
+function fetchHistory(){
+  var d=new Date(),key=KEY+'-h-'+ymd(d);
+  try{var c=JSON.parse(localStorage.getItem(key));if(c&&c.length){hist=c;return Promise.resolve();}}catch(e){}
+  function tryLang(lang){
+    var u='https://'+lang+'.wikipedia.org/api/rest_v1/feed/onthisday/events/'+pad(d.getMonth()+1)+'/'+pad(d.getDate());
+    return getJSON(u).then(function(j){
+      var ev=(j.events||[]).filter(function(e){return e.text&&e.text.length<170;});
+      ev.sort(function(a,b){return (b.pages||[]).length-(a.pages||[]).length;});
+      ev=ev.slice(0,4).sort(function(a,b){return a.year-b.year;}).map(function(e){return {y:e.year,t:e.text};});
+      if(!ev.length)throw new Error('empty');
+      return ev;
+    });
+  }
+  return tryLang('vi').catch(function(){return tryLang('en');}).then(function(ev){
+    hist=ev;try{localStorage.setItem(key,JSON.stringify(ev));}catch(e){}
+    if(view==='main')render();
+  }).catch(function(){});
+}
+
+/* ---------- giao diện chính ---------- */
+function card(title,inner){return '<div class="card"><h2>'+esc(title)+'</h2>'+inner+'</div>';}
+function greeting(now){
+  var h=now.getHours();
+  var g=h<11?'Chào buổi sáng':h<14?'Chào buổi trưa':h<18?'Chào buổi chiều':'Chào buổi tối';
+  return g+(state.name?', '+esc(state.name):'')+'!';
+}
+function dayPct(now){return Math.round((now.getHours()*60+now.getMinutes())/14.4);}
+function headHTML(now){
+  var lu=state.show.lunar?lunar(now):'';
+  return '<div class="head"><div><div class="hello">'+greeting(now)+'</div>'+
+    '<div class="date">'+DOW[now.getDay()]+'<br>'+now.getDate()+' tháng '+(now.getMonth()+1)+', '+now.getFullYear()+'</div>'+
+    (lu?'<div class="lunar">Âm lịch: '+esc(lu)+'</div>':'')+'</div>'+
+    '<div><div class="clock" id="clock">'+pad(now.getHours())+':'+pad(now.getMinutes())+'</div>'+
+    '<div class="bar"><i id="bar" style="width:'+dayPct(now)+'%"></i></div>'+
+    '<div class="mut" style="text-align:right">Đã qua <span id="pct">'+dayPct(now)+'</span>% ngày</div></div></div>';
+}
+function weatherHTML(){
+  if(!weather)return card('Thời tiết · '+esc(state.city.name),'<p class="mut">'+esc(weatherErr||'Đang tải…')+'</p>');
+  var c=weather.current,d=weather.daily,w=wc(c.weather_code);
+  var h='<div class="row"><span class="big">'+Math.round(c.temperature_2m)+'°</span><span style="font-size:1.4rem">'+w.ic+' '+w.tx+'</span></div>'+
+    '<div class="mut">Cảm giác '+Math.round(c.apparent_temperature)+'° · Ẩm '+c.relative_humidity_2m+'% · Gió '+Math.round(c.wind_speed_10m)+' km/h</div>'+
+    '<div style="margin-top:.3rem">Cao <b>'+Math.round(d.temperature_2m_max[0])+'°</b> / Thấp <b>'+Math.round(d.temperature_2m_min[0])+'°</b> · Khả năng mưa <b>'+(d.precipitation_probability_max[0]||0)+'%</b></div>'+
+    '<div class="mut">Mặt trời mọc '+d.sunrise[0].slice(11,16)+' · lặn '+d.sunset[0].slice(11,16)+' · UV tối đa '+Math.round(d.uv_index_max[0])+'</div>';
+  if(state.show.aqi&&air&&air.current&&air.current.us_aqi!=null){
+    h+='<div style="margin-top:.3rem">Không khí (AQI): <b>'+Math.round(air.current.us_aqi)+'</b> – '+aqiLabel(air.current.us_aqi)+'</div>';
+  }
+  if(state.show.hourly){
+    var hh=weather.hourly,now=c.time.slice(0,13),i=hh.time.findIndex(function(t){return t.indexOf(now)===0;});
+    if(i<0)i=0;
+    var cells='';
+    for(var k=3;k<=18&&i+k<hh.time.length;k+=3){
+      var x=wc(hh.weather_code[i+k]);
+      cells+='<div><b>'+hh.time[i+k].slice(11,13)+'h</b>'+x.ic+'<br>'+Math.round(hh.temperature_2m[i+k])+'°<br>'+(hh.precipitation_probability[i+k]||0)+'%</div>';
+    }
+    h+='<div class="hours">'+cells+'</div>';
+  }
+  return card('Thời tiết · '+esc(state.city.name),h);
+}
+function eventsHTML(now){
+  var ev=eventsOn(now);
+  var h=ev.length?'<ul>'+ev.map(function(e){return '<li><b>'+(e.time||'Cả ngày')+'</b> · '+esc(e.title)+'</li>';}).join('')+'</ul>':'<p class="mut">Hôm nay không có sự kiện.</p>';
+  return card('Sự kiện hôm nay',h);
+}
+function upcomingHTML(now){
+  var out='';
+  for(var i=1;i<=7;i++){
+    var d=addDays(now,i),ev=eventsOn(d);
+    if(ev.length)out+='<li><span class="day">'+DOW[d.getDay()]+' '+dm(d)+'</span><br>'+ev.map(function(e){return (e.time?e.time+' · ':'')+esc(e.title);}).join('<br>')+'</li>';
+  }
+  return card('7 ngày tới',out?'<ul>'+out+'</ul>':'<p class="mut">Chưa có sự kiện nào.</p>');
+}
+function tasksHTML(){
+  var h=state.tasks.length?'<ul>'+state.tasks.map(function(t){
+    return '<li class="'+(t.done?'done':'')+'" data-act="toggleTask" data-id="'+t.id+'"><span class="box">'+(t.done?'✓':'')+'</span><span class="t">'+esc(t.text)+'</span>'+(t.repeat?' <span class="mut">(hằng ngày)</span>':'')+'</li>';
+  }).join('')+'</ul>':'<p class="mut">Chưa có việc nào. Bấm “Sửa” để thêm.</p>';
+  var left=state.tasks.filter(function(t){return !t.done;}).length;
+  return card('Việc cần làm'+(state.tasks.length?' · còn '+left:''),h);
+}
+function countdownHTML(now){
+  var today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  var items=state.countdowns.map(function(c){var d=parseYmd(c.date);return d?{t:c.title,n:Math.round((d-today)/864e5)}:null;})
+    .filter(function(x){return x&&x.n>=0;}).sort(function(a,b){return a.n-b.n;});
+  if(!items.length)return '';
+  return card('Đếm ngược','<ul>'+items.map(function(x){return '<li><b>'+(x.n===0?'Hôm nay!':'Còn '+x.n+' ngày')+'</b> · '+esc(x.t)+'</li>';}).join('')+'</ul>');
+}
+function noteHTML(){
+  if(!state.note.trim())return '';
+  return card('Ghi chú','<div style="white-space:pre-wrap;font-size:1.05rem">'+esc(state.note)+'</div>');
+}
+function historyHTML(){
+  if(!hist||!hist.length)return '';
+  return card('Ngày này trong lịch sử','<ul class="hist">'+hist.map(function(e){return '<li><b>'+e.y+'</b> '+esc(e.t)+'</li>';}).join('')+'</ul>');
+}
+function renderMain(){
+  var now=new Date(),s=state.show;
+  var h=headHTML(now)+'<div class="cols">';
+  if(s.weather)h+=weatherHTML();
+  if(s.events)h+=eventsHTML(now);
+  if(s.tasks)h+=tasksHTML();
+  if(s.upcoming)h+=upcomingHTML(now);
+  if(s.countdown)h+=countdownHTML(now);
+  if(s.note)h+=noteHTML();
+  if(s.history)h+=historyHTML();
+  h+='</div><div class="foot"><span class="mut">Cập nhật '+pad(now.getHours())+':'+pad(now.getMinutes())+'</span><button class="btn" data-act="edit">⚙ Sửa</button></div>';
+  return h;
+}
+
+/* ---------- màn hình chỉnh sửa ---------- */
+function renderEdit(){
+  var h='<div class="head"><div class="date">Chỉnh sửa</div><button class="btn on" data-act="done">Xong</button></div>';
+  // chung
+  h+='<div class="card"><h2>Chung</h2>'+
+    '<div class="f"><input id="in-name" placeholder="Tên của bạn (để chào)" value="'+esc(state.name)+'"><button class="btn" data-act="saveName">Lưu tên</button></div>'+
+    '<div class="f"><input id="in-city" placeholder="Tìm thành phố (vd: Hải Phòng)"><button class="btn" data-act="findCity">Tìm</button></div>'+
+    '<div id="city-res"></div><div class="mut">Đang dùng: '+esc(state.city.name)+'</div>'+
+    '<div class="f"><span>Cỡ chữ: '+Math.round(state.scale*100)+'%</span><button class="btn sm" data-act="smaller">A−</button><button class="btn sm" data-act="bigger">A+</button></div>'+
+    '<div class="f"><span>Làm mới thời tiết mỗi</span><select id="in-ref" data-act="setRef">'+[15,30,60,120].map(function(m){return '<option value="'+m+'"'+(state.refreshMin===m?' selected':'')+'>'+m+' phút</option>';}).join('')+'</select></div>'+
+    '<label class="chk"><input type="checkbox" data-act="setWake"'+(state.wake?' checked':'')+'> Giữ màn hình luôn sáng (khi đang mở trang)</label>'+
+    '<div class="f"><button class="btn" data-act="full">Toàn màn hình</button></div></div>';
+  // hiển thị
+  h+='<div class="card"><h2>Hiển thị mục nào</h2>'+SECTIONS.map(function(x){
+    return '<label class="chk"><input type="checkbox" data-act="show" data-id="'+x[0]+'"'+(state.show[x[0]]?' checked':'')+'> '+x[1]+'</label>';
+  }).join('')+'</div>';
+  // sự kiện
+  var today=ymd(new Date());
+  h+='<div class="card"><h2>Sự kiện / lịch hẹn</h2>'+
+    '<div class="f"><input id="ev-title" placeholder="Tên sự kiện"></div>'+
+    '<div class="f"><input id="ev-date" type="date" value="'+today+'"><input id="ev-time" type="time"></div>'+
+    '<div class="f"><select id="ev-rep">'+Object.keys(REP).map(function(k){return '<option value="'+k+'">'+REP[k]+'</option>';}).join('')+'</select><button class="btn" data-act="addEvent">Thêm</button></div>'+
+    '<ul>'+state.events.slice().sort(function(a,b){return a.date.localeCompare(b.date);}).map(function(e){
+      return '<li>'+esc(e.date.split('-').reverse().join('/'))+(e.time?' '+e.time:'')+' · '+esc(e.title)+' <span class="mut">('+REP[e.repeat||'none']+')</span> <button class="btn sm" data-act="delEvent" data-id="'+e.id+'">Xóa</button></li>';
+    }).join('')+'</ul></div>';
+  // việc
+  h+='<div class="card"><h2>Việc cần làm</h2>'+
+    '<div class="f"><input id="tk-text" placeholder="Việc cần làm"><button class="btn" data-act="addTask">Thêm</button></div>'+
+    '<label class="chk"><input type="checkbox" id="tk-rep"> Lặp lại mỗi ngày (tự bỏ tích sang ngày mới)</label>'+
+    '<ul>'+state.tasks.map(function(t){return '<li>'+esc(t.text)+(t.repeat?' <span class="mut">(hằng ngày)</span>':'')+' <button class="btn sm" data-act="delTask" data-id="'+t.id+'">Xóa</button></li>';}).join('')+'</ul></div>';
+  // đếm ngược
+  h+='<div class="card"><h2>Đếm ngược</h2>'+
+    '<div class="f"><input id="cd-title" placeholder="Tên (vd: Sinh nhật mẹ)"><input id="cd-date" type="date"><button class="btn" data-act="addCd">Thêm</button></div>'+
+    '<ul>'+state.countdowns.map(function(c){return '<li>'+esc(c.date.split('-').reverse().join('/'))+' · '+esc(c.title)+' <button class="btn sm" data-act="delCd" data-id="'+c.id+'">Xóa</button></li>';}).join('')+'</ul></div>';
+  // ghi chú
+  h+='<div class="card"><h2>Ghi chú / mục tiêu</h2><textarea id="in-note" placeholder="Câu trích dẫn, mục tiêu tuần…">'+esc(state.note)+'</textarea><div class="f"><button class="btn" data-act="saveNote">Lưu ghi chú</button></div></div>';
+  // sao lưu
+  h+='<div class="card"><h2>Sao lưu / chuyển máy</h2><div class="mut">Sao chép đoạn văn bản dưới để lưu lại, hoặc dán dữ liệu cũ vào rồi bấm Nạp.</div>'+
+    '<textarea id="in-backup">'+esc(JSON.stringify(state))+'</textarea><div class="f"><button class="btn" data-act="import">Nạp dữ liệu</button></div></div>';
+  h+='<div class="foot"><span></span><button class="btn on" data-act="done">Xong</button></div>';
+  return h;
+}
+
+function render(){
+  var app=document.querySelector('#app');
+  app.innerHTML=(view==='main')?renderMain():renderEdit();
+}
+function v(id){var e=document.querySelector('#'+id);return e?e.value:'';}
+
+/* ---------- xử lý thao tác ---------- */
+function onClick(ev){
+  var el=ev.target;
+  while(el&&el!==document.body&&!(el.getAttribute&&el.getAttribute('data-act')))el=el.parentNode;
+  if(!el||!el.getAttribute)return;
+  var act=el.getAttribute('data-act'),id=el.getAttribute('data-id');
+  if(el.tagName==='SELECT'||(el.tagName==='INPUT'&&el.type==='checkbox'&&act!=='x'))return; // xử lý ở sự kiện change
+  switch(act){
+    case 'edit':view='edit';render();window.scrollTo(0,0);break;
+    case 'done':view='main';render();window.scrollTo(0,0);break;
+    case 'toggleTask':state.tasks.forEach(function(t){if(t.id===id)t.done=!t.done;});save();render();break;
+    case 'saveName':state.name=v('in-name').trim();save();render();break;
+    case 'findCity':findCity();break;
+    case 'pickCity':state.city={name:el.getAttribute('data-name'),lat:+el.getAttribute('data-lat'),lon:+el.getAttribute('data-lon')};save();weather=null;air=null;fetchWeather();render();break;
+    case 'smaller':setScale(-0.1);break;
+    case 'bigger':setScale(0.1);break;
+    case 'full':try{document.documentElement.requestFullscreen();}catch(e){}break;
+    case 'addEvent':
+      var t=v('ev-title').trim(),d=v('ev-date');
+      if(t&&parseYmd(d)){state.events.push({id:uid(),title:t,date:d,time:v('ev-time'),repeat:v('ev-rep')});save();render();}
+      break;
+    case 'delEvent':state.events=state.events.filter(function(e){return e.id!==id;});save();render();break;
+    case 'addTask':
+      var tx=v('tk-text').trim();
+      if(tx){state.tasks.push({id:uid(),text:tx,done:false,repeat:!!document.querySelector('#tk-rep').checked});save();render();}
+      break;
+    case 'delTask':state.tasks=state.tasks.filter(function(e){return e.id!==id;});save();render();break;
+    case 'addCd':
+      var ct=v('cd-title').trim(),cd=v('cd-date');
+      if(ct&&parseYmd(cd)){state.countdowns.push({id:uid(),title:ct,date:cd});save();render();}
+      break;
+    case 'delCd':state.countdowns=state.countdowns.filter(function(e){return e.id!==id;});save();render();break;
+    case 'saveNote':state.note=v('in-note');save();render();break;
+    case 'import':
+      try{state=merge(JSON.parse(v('in-backup')));save();applyScale();render();}catch(e){alert('Dữ liệu không hợp lệ.');}
+      break;
+  }
+}
+function onChange(ev){
+  var el=ev.target,act=el.getAttribute&&el.getAttribute('data-act');
+  if(!act)return;
+  if(act==='show'){state.show[el.getAttribute('data-id')]=el.checked;save();}
+  else if(act==='setRef'){state.refreshMin=+el.value;save();}
+  else if(act==='setWake'){state.wake=el.checked;save();applyWake();}
+}
+function setScale(dx){state.scale=Math.max(0.7,Math.min(1.8,Math.round((state.scale+dx)*10)/10));save();applyScale();render();}
+function applyScale(){document.documentElement.style.setProperty('--s',state.scale);}
+function findCity(){
+  var q=v('in-city').trim(),box=document.querySelector('#city-res');
+  if(!q)return;
+  box.innerHTML='<div class="mut">Đang tìm…</div>';
+  getJSON('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=5&language=vi&format=json').then(function(j){
+    var r=j.results||[];
+    box.innerHTML=r.length?r.map(function(c){
+      var label=c.name+(c.admin1?', '+c.admin1:'')+(c.country?', '+c.country:'');
+      return '<div class="f"><button class="btn" style="text-align:left" data-act="pickCity" data-name="'+esc(c.name)+'" data-lat="'+c.latitude+'" data-lon="'+c.longitude+'">'+esc(label)+'</button></div>';
+    }).join(''):'<div class="mut">Không tìm thấy.</div>';
+  }).catch(function(){box.innerHTML='<div class="mut">Lỗi mạng, thử lại.</div>';});
+}
+function applyWake(){
+  try{
+    if(state.wake&&navigator.wakeLock){navigator.wakeLock.request('screen').then(function(l){wl=l;}).catch(function(){});}
+    else if(wl){wl.release();wl=null;}
+  }catch(e){}
+}
+
+/* ---------- vòng lặp ---------- */
+var lastMin='',lastDate='';
+function tick(){
+  var now=new Date(),m=pad(now.getHours())+':'+pad(now.getMinutes()),d=ymd(now);
+  if(d!==lastDate){
+    lastDate=d;dailyMaintenance();hist=null;fetchHistory();
+    if(view==='main')render();
+  }
+  if(m!==lastMin){
+    lastMin=m;
+    if(view==='main'){
+      var c=document.querySelector('#clock'),b=document.querySelector('#bar'),p=document.querySelector('#pct');
+      if(c)c.textContent=m;if(b)b.style.width=dayPct(now)+'%';if(p)p.textContent=dayPct(now);
+    }
+  }
+  if(Date.now()-lastFetch>state.refreshMin*60000)fetchWeather();
+}
+function init(){
+  applyScale();dailyMaintenance();
+  try{var c=JSON.parse(localStorage.getItem(KEY+'-w'));if(c&&c.j){weather=c.j;}}catch(e){}
+  document.body.addEventListener('click',onClick);
+  document.body.addEventListener('change',onChange);
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'){applyWake();tick();}});
+  lastDate=ymd(new Date());
+  render();
+  fetchWeather();fetchHistory();applyWake();
+  setInterval(tick,15000);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+</script>
+<script>
+if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+  window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});
+}
+</script>
+</body>
+</html>
